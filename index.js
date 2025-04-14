@@ -10,33 +10,37 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 
 app.use(cors({
-  origin: ['http://localhost:5173'],
+  origin: [
+    'http://localhost:5173',
+    'https://job-portal-b30d2.web.app',
+    'https://job-portal-b30d2.firebaseapp.com'
+  ],
   credentials: true
 }))
 app.use(express.json())
 app.use(cookieParser())
 
-const logger = (req,res,next) => {
+const logger = (req, res, next) => {
   console.log('inside the logger');
   next()
 }
 
-const VerifyToken = (req,res,next) => {
+const VerifyToken = (req, res, next) => {
   // console.log('inside verify token middleware',req.cookies);
   const token = req?.cookies?.token
   if (!token) {
-    return res.status(401).send({message: 'Unauthorized Access'})
+    return res.status(401).send({ message: 'Unauthorized Access' })
   }
 
-  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err,decoded) => {
+  // verify the token
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(401).send({message: 'unAuthorized access'})
+      return res.status(401).send({ message: 'unauthorized access' })
     }
+    req.user = decoded
   })
-
   next()
 }
-
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.esqhd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -52,30 +56,38 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
 
     // jobs related apis
     const jobsCollection = client.db('jobPortal').collection('jobs')
     const jobApplicationCollection = client.db('jobPortal').collection('job_applications')
 
     // Auth related Apis
-    app.post('/jwt', async (req, res) => {
+    app.post('/jwt', (req, res) => {
       const user = req.body
-      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '5h' })
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '10h' })
       res.cookie('token', token, {
         httpOnly: true,
-        secure: false,
+        secure: false
       })
         .send({ success: true })
 
     })
 
+    app.post('/logout', (req, res) => {
+      res.clearCookie('token', {
+        httpOnly: true,
+        secure: false
+      })
+        .send({ success: true })
+    })
+
 
     // jobs Related APIS
-    app.get('/jobs',logger, async (req, res) => {
+    app.get('/jobs', logger, async (req, res) => {
       console.log('now inside the api call back');
       const email = req.query.email
       let query = {}
@@ -102,12 +114,18 @@ async function run() {
 
     // job application apis
     // get all data, get one data,get some data [0,1,many]
-    app.get('/job-application',VerifyToken, async (req, res) => {
+    app.get('/job-application', VerifyToken, async (req, res) => {
       const email = req.query.email
       const query = { applicant_email: email }
-      console.log('cuk cuk cookies', req.cookies);
+      // console.log('cuk cuk cookies', req.cookies);
+
+      if (req.user.email !== req.query.email) {
+        return res.status(403).send({ message: 'forbidden access' })
+      }
+
       const result = await jobApplicationCollection.find(query).toArray()
 
+      // fokira way to aggregate data
       for (const application of result) {
         console.log(application.job_id)
         const query1 = { _id: new ObjectId(application.job_id) }
